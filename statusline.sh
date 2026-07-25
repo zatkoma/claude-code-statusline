@@ -16,7 +16,7 @@
 input=$(cat)
 
 # One jq pass: model, effort, context %, rate limits.
-IFS=$'\x1f' read -r MODEL EFFORT PERCENT RL5 RL7 <<EOF
+IFS=$'\x1f' read -r MODEL EFFORT PERCENT RL5 RL7 RL5R RL7R <<EOF
 $(printf '%s' "$input" | jq -r '
   [ (.model.display_name // "?"),
     (.effort.level // ""),
@@ -25,7 +25,9 @@ $(printf '%s' "$input" | jq -r '
             then (.context_window.total_input_tokens // 0) * 100 / .context_window.context_window_size
             else 0 end)) | floor),
     ((.rate_limits.five_hour.used_percentage // -1) | floor),
-    ((.rate_limits.seven_day.used_percentage // -1) | floor)
+    ((.rate_limits.seven_day.used_percentage // -1) | floor),
+    ((.rate_limits.five_hour.resets_at // -1) | floor),
+    ((.rate_limits.seven_day.resets_at // -1) | floor)
   ] | map(tostring) | join("")' 2>/dev/null)
 EOF
 
@@ -34,6 +36,8 @@ EOF
 [ -z "$MODEL" ]   && MODEL="?"
 [ -z "$RL5" ]     && RL5=-1
 [ -z "$RL7" ]     && RL7=-1
+[ -z "$RL5R" ]    && RL5R=-1
+[ -z "$RL7R" ]    && RL7R=-1
 
 # Colors.
 C_RESET=$'\033[0m'; C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'
@@ -85,14 +89,24 @@ for ((i = 1; i <= 10; i++)); do
   if [ "$i" -le "$FILLED" ]; then BAR="${BAR}█"; else BAR="${BAR}░"; fi
 done
 
+# Format a Unix-epoch reset time; empty when the field is absent (-1) or unparsable.
+# $1 = epoch, $2 = date format (e.g. %H:%M for 5h, %d.%m for 7d).
+fmt_reset() {
+  [ "$1" -ge 0 ] 2>/dev/null || return 0
+  date -r "$1" +"$2" 2>/dev/null
+}
+
 # Rate-limit value — empty when both fields are missing (segment hides itself).
+# Shows used % and, when available, when the window resets: 5h:12% ⟳14:30
 RL=""
 if [ "$RL5" -ge 0 ]; then
   RL="$(pct_color "$RL5")5h:${RL5}%${C_RESET}"
+  R=$(fmt_reset "$RL5R" "%H:%M"); [ -n "$R" ] && RL="${RL}${C_LABEL}⟳${R}${C_RESET}"
 fi
 if [ "$RL7" -ge 0 ]; then
   [ -n "$RL" ] && RL="${RL} · "
   RL="${RL}$(pct_color "$RL7")7d:${RL7}%${C_RESET}"
+  R=$(fmt_reset "$RL7R" "%d.%m"); [ -n "$R" ] && RL="${RL}${C_LABEL}⟳${R}${C_RESET}"
 fi
 
 # Assemble: «INSTANCE» [model ·effort] | 📁 dir | 🌿 branch | Context: <bar> % | Limits: 5h/7d

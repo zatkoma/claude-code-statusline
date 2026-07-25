@@ -5,7 +5,7 @@ ukazuje **kterou instanci mám spuštěnou**, model, složku, git branch, zapln�
 context window a využití 5h / 7denních limitů.
 
 ```
-«🏢 WORK» [Opus 4.8 ·low] | 📁 muj-projekt | 🌿 main± | Context: ██░░░░░░░░ 23% | Limits: 5h:12% · 7d:40%
+«🏢 WORK» [Opus 4.8 ·low] | 📁 muj-projekt | 🌿 main± | Context: ██░░░░░░░░ 23% | Limits: 5h:12% ⟳17:30 · 7d:40% ⟳28.07
 ```
 
 Základ převzat z [faborsky/claude-code-statusline](https://github.com/faborsky/claude-code-statusline)
@@ -22,7 +22,7 @@ ve které konfiguraci session běží.
 | `📁 muj-projekt` | aktuální složka |
 | `🌿 main±` | git branch; `±` = necommitnuté změny; `no-git` mimo repo |
 | `Context: ██░░░ 23%` | zaplnění context window (10 segmentů, barevně dle %) |
-| `Limits: 5h:12% · 7d:40%` | využití limitů — **jen s Pro/Max předplatným**, jinak se skryje |
+| `Limits: 5h:12% ⟳17:30 · 7d:40% ⟳28.07` | využití limitů + čas/datum obnovení (`⟳`) — **jen s Pro/Max předplatným**, jinak se skryje |
 
 ## Požadavky
 
