@@ -53,9 +53,10 @@ INSTANCE_COLOR="$CLAUDE_INSTANCE_COLOR"
 if [ -z "$INSTANCE" ]; then
   CFG=$(basename "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")
   case "$CFG" in
-    .claude-work) INSTANCE="🏢 WORK";     INSTANCE_COLOR="$C_BLUE" ;;
-    .claude)      INSTANCE="🏠 PERSONAL"; INSTANCE_COLOR="$C_GREEN" ;;
-    *)            INSTANCE="⚙ ${CFG#.}";  INSTANCE_COLOR="$C_MAGENTA" ;;
+    .claude-work)     INSTANCE="🏢 WORK";     INSTANCE_COLOR="$C_BLUE" ;;
+    .claude-personal) INSTANCE="🏠 PERSONAL"; INSTANCE_COLOR="$C_GREEN" ;;
+    .claude)          INSTANCE="⚙ BASIC";     INSTANCE_COLOR="$C_LABEL" ;;
+    *)                INSTANCE="⚙ ${CFG#.}";  INSTANCE_COLOR="$C_MAGENTA" ;;
   esac
 fi
 [ -z "$INSTANCE_COLOR" ] && INSTANCE_COLOR="$C_MAGENTA"

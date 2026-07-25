@@ -60,7 +60,8 @@ Badge se určuje v tomto pořadí:
    nastavený přes `env` v `settings.json`. Má přednost.
 2. Jinak **podle `$CLAUDE_CONFIG_DIR`**:
    - `.claude-work` → `🏢 WORK` (modrá)
-   - `.claude` → `🏠 PERSONAL` (zelená)
+   - `.claude-personal` → `🏠 PERSONAL` (zelená)
+   - `.claude` → `⚙ BASIC` (šedá, výchozí instance)
    - cokoli jiného → `⚙ <název>` (fialová)
 
 Vlastní název a barva:
