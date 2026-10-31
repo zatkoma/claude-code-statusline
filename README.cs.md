@@ -33,6 +33,7 @@ Limits: 5h:60%⟳11:25 ⚠10:35 · 7d:20%⟳05.11 →59% | cache 42m (⌛09:54/1
 | `5h:60%⟳11:25` | využití pětihodinového limitu a v kolik se resetuje |
 | `⚠10:35` | **červeně:** při dosavadním tempu narazíš na 100 % v 10:35, *ještě před* resetem |
 | `→59%` | **šedě:** při dosavadním tempu budeš při resetu na 59 %, takže v pohodě |
+| `↗` / `↘` | za 5h predikcí: teď jedeš rychleji / pomaleji než průměr tohohle okna ([jak](#jak-se-to-počítá)) |
 | `7d:20%⟳05.11` | totéž pro týdenní limit, reset jako datum |
 | `cache 42m (⌛09:54/1h)` | **prompt cache**: za kolik minut vyprší, v kolik a jaké TTL se platilo (`5m` nebo `1h`). `cache ✗` = vypršela, další zpráva zaplatí celé načtení znovu |
 | `⛵ název◐` | worktree v Orce a stav jeho karty (`○` todo, `◐` rozpracované, `◔` review, `●` hotovo); jen když je nainstalované `orca` CLI |
@@ -60,6 +61,8 @@ Když je 2. řádek prázdný, zbude jeden.
 > Status line se spouští často, takže v ní nic nečeká na síť: git je jedno volání
 > `git status --porcelain=v2` bez fetchování, `cache-expiry.py` čte jen posledních
 > 512 kB transcriptu a `orca` CLI se volá na pozadí s výsledkem drženým 20 sekund.
+> Jediné, co zapisuje, je malá historie limitů v `$TMPDIR` (nejvýš řádek za minutu,
+> ořezaná na poslední hodinu).
 
 ## Instalace
 
@@ -129,6 +132,7 @@ Ve skriptu:
 - **Barevné prahy**: hodnoty `50 / 70 / 90` ve funkci `pct_color`.
 - **Mapování badge**: blok `case "$CFG"` v sekci *Instance badge*.
 - **Rozjezd predikce**: `900` sekund ve funkci `predict_full`, po které predikce mlčí.
+- **Okno nedávného tempa**: poslední argument volání `predict_full` (`1800` s pro 5h, `0` = průměr celého okna pro 7d).
 - **Obnova Orcy**: `ORCA_TTL` v sekci *Orca worktree*.
 - **Rozložení a pořadí**: sekce *Assemble* na konci souboru.
 
@@ -142,9 +146,23 @@ se čte **jedním** průchodem `jq`.
 nulu a nic by neřekla. 400k je zvolená hranice, kdy se vyplatí začít novou session. Nad ní
 jde ukazatel přes 100 %. Změníš ji přes `CLAUDE_CTX_BUDGET`.
 
-**Predikce.** Lineárně z dosavadního tempa v okně: začátek okna = reset − délka okna (5 h
-nebo 7 dní). Když 100 % přijde před resetem, ukáže se červené `⚠čas`, jinak šedé `→N%`,
-kde budeš při resetu. Prvních 15 minut okna predikce mlčí, odhad by byl jen šum.
+**Predikce.** Lineární protažení tempa. Když 100 % přijde před resetem, ukáže se červené
+`⚠čas`, jinak šedé `→N%`, kde budeš při resetu. Prvních 15 minut okna predikce mlčí, odhad
+by byl jen šum.
+
+Tempo se bere ze dvou míst:
+
+- **5h limit: nedávné tempo.** Statuslina si v `$TMPDIR` drží krátkou historii procent
+  a tempo počítá za **posledních 30 minut**, takže predikce zareaguje, jakmile se rozjedeš
+  nebo zvolníš. Historii sdílí všechny session jednoho config diru: limit je na účet, takže
+  tempo je jejich součet. Šipka ho porovnává s průměrem celého okna (`↗` o víc než 25 %
+  rychleji, `↘` o víc než 25 % pomaleji).
+- **Týdenní limit: průměr celého okna** (začátek = reset − 7 dní). Krátký úsek by nesl denní
+  rytmus: rušné odpoledne protažené přes noci by zbytečně strašilo, klidný večer by ukolébal.
+
+5h predikce se vrací k průměru okna, dokud je historie kratší než 15 minut (po startu nebo
+resetu), a když za posledních 30 minut přibyly méně než 2 %. Limity chodí po celých
+procentech, takže tak malé tempo je hlavně zaokrouhlení. Šipka `↘` ale zpomalení ukáže.
 
 **Cache.** `lib/cache-expiry.py` čte z transcriptu session `usage.cache_creation`, tedy to,
 co API skutečně naúčtovalo. Nenulové `ephemeral_1h_input_tokens` znamená hodinový zápis

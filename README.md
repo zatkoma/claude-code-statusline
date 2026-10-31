@@ -34,6 +34,7 @@ Limits: 5h:60%⟳11:25 ⚠10:35 · 7d:20%⟳05.11 →59% | cache 42m (⌛09:54/1
 | `5h:60%⟳11:25` | five-hour limit usage and the clock time it resets |
 | `⚠10:35` | **red:** at your current pace you hit 100 % at 10:35, *before* the reset |
 | `→59%` | **grey:** at your current pace you'll be at 59 % when the window resets, so you're fine |
+| `↗` / `↘` | after a 5h prediction: you're going faster / slower right now than your average in this window ([how](#how-its-calculated)) |
 | `7d:20%⟳05.11` | the same for the weekly cap, reset shown as a date |
 | `cache 42m (⌛09:54/1h)` | **prompt cache**: minutes until it expires, the clock time, and which TTL you paid for (`5m` or `1h`). `cache ✗` = expired, the next message pays for a full re-read |
 | `⛵ name◐` | Orca worktree and its card status (`○` todo, `◐` in progress, `◔` in review, `●` done); only when the `orca` CLI is installed |
@@ -61,7 +62,8 @@ transcript, Orca only with its CLI. If line 2 is empty, you get a single line.
 > The status line runs often, so nothing in it waits on the network: git is one
 > `git status --porcelain=v2` call with no fetch, `cache-expiry.py` reads only the last
 > 512 kB of the transcript, and the `orca` CLI is called in the background with its result
-> cached for 20 seconds.
+> cached for 20 seconds. The only thing it writes is a small limit history in `$TMPDIR`
+> (one line a minute at most, trimmed to the last hour).
 
 ## Installation
 
@@ -131,6 +133,7 @@ In the script:
 - **Color thresholds**: the `50 / 70 / 90` values in `pct_color`.
 - **Badge mapping**: the `case "$CFG"` block in the *Instance badge* section.
 - **Prediction warm-up**: the `900` seconds in `predict_full`, during which predictions stay silent.
+- **Recent-pace window**: the last argument of the `predict_full` calls (`1800` s for 5h, `0` = whole-window average for 7d).
 - **Orca refresh**: `ORCA_TTL` in the *Orca worktree* section.
 - **Layout and order**: the *Assemble* section at the end of the file.
 
@@ -144,10 +147,26 @@ whole payload is parsed in **one** `jq` pass.
 most of a session and tell you nothing. 400k is a chosen point at which it's worth starting
 a fresh session. Above it the bar goes past 100 %. Change it with `CLAUDE_CTX_BUDGET`.
 
-**Predictions.** Linear from your pace so far in the window: window start = reset time −
-window length (5 h or 7 days). If 100 % arrives before the reset, you get a red `⚠time`;
-otherwise a grey `→N%` for where you'll land at the reset. The first 15 minutes of a window
-stay silent, the estimate would just be noise.
+**Predictions.** Linear extrapolation of your pace. If 100 % arrives before the reset, you
+get a red `⚠time`; otherwise a grey `→N%` for where you'll land at the reset. The first
+15 minutes of a window stay silent, the estimate would just be noise.
+
+The pace comes from two places:
+
+- **5-hour limit: your recent pace.** The status line keeps a short history of the limit
+  percentages in `$TMPDIR` and takes the pace over the **last 30 minutes**, so the
+  prediction reacts as soon as you speed up or slow down. The history is shared by all
+  sessions of one config dir: the limit is per account, so the pace is their sum. The
+  arrow compares it with the average pace of the whole window (`↗` more than 25 % faster,
+  `↘` more than 25 % slower).
+- **Weekly limit: the average of the whole window** (start = reset − 7 days). A short
+  recent window would carry your daily rhythm: a busy afternoon extrapolated over the
+  nights would scare you for nothing, a quiet evening would lull you.
+
+The 5-hour prediction falls back to the window average while there's under 15 minutes of
+history (right after start or a reset), and when you've used less than 2 % in the last
+30 minutes. Limits come as whole percentages, so a pace that small is mostly rounding; the
+`↘` still tells you you've slowed down.
 
 **Cache.** `lib/cache-expiry.py` reads `usage.cache_creation` from the session transcript,
 which is what the API actually billed. A non-zero `ephemeral_1h_input_tokens` means a

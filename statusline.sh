@@ -197,20 +197,62 @@ fmt_reset() {
 
 # Rate-limit value — empty when both fields are missing (segment hides itself).
 # Shows used % and, when available, when the window resets: 5h:12% ⟳14:30
-# Predikce: lineárně z dosavadního tempa v okně (start = reset − délka okna).
-# Když se 100 % stihne dřív než reset, vypíše červeně ⚠HH:MM; jinak šedě →N %,
-# kolik bude při resetu. Prvních 15 minut okna mlčí, odhad by byl šum.
-# $1 = used %, $2 = reset epoch, $3 = okno v s, $4 = formát.
+#
+# Predikce: kdy při současném tempu dojde limit. U 5h okna se tempo bere z posledních
+# 30 min, aby predikce reagovala, když se rozjedeš nebo zvolníš. 7d okno jede z průměru
+# celého okna: krátký úsek by nesl denní rytmus (den/noc) a predikce by ujížděla. Historii si statuslina ukládá do $TMPDIR, sdílí ji všechny
+# session jednoho config diru — limit je na účet, takže tempo je jejich součet.
+# Dokud historie nestačí (po startu nebo resetu okna) nebo se nedávno skoro nic
+# nedělo (< 2 %, procenta chodí po celých číslech), počítá se z průměru celého okna.
+# Výstup: červeně ⚠HH:MM, když 100 % přijde před resetem; jinak šedě →N %, kde budeš
+# při resetu. Šipka ↗/↘ = teď jedeš rychleji/pomaleji než průměr okna.
+RL_HIST="${TMPDIR:-/tmp}/claude-statusline-rl.$(id -u).$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | md5 -q 2>/dev/null || printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | md5sum | cut -d' ' -f1)"
+NOW=$(date +%s)
+if [ "$RL5" -ge 0 ] || [ "$RL7" -ge 0 ]; then {
+  # Zápis jen při změně nebo jednou za minutu; historie se drží 1 h.
+  LAST=$(tail -n 1 "$RL_HIST" 2>/dev/null)
+  if [ "${LAST#* }" != "$RL5 $RL5R $RL7 $RL7R" ] || [ $(( NOW - ${LAST%% *} )) -ge 60 ] 2>/dev/null || [ -z "$LAST" ]; then
+    echo "$NOW $RL5 $RL5R $RL7 $RL7R" >> "$RL_HIST" 2>/dev/null
+    if [ "$(wc -l < "$RL_HIST" 2>/dev/null)" -gt 600 ]; then
+      awk -v min=$(( NOW - 3700 )) '$1 >= min' "$RL_HIST" > "$RL_HIST.tmp" && mv -f "$RL_HIST.tmp" "$RL_HIST"
+    fi
+  fi
+} 2>/dev/null; fi
+
+# $1 = used %, $2 = reset epoch, $3 = okno v s, $4 = formát času, $5 = sloupec % v historii,
+# $6 = jak daleko do historie (s), 0 = jen průměr celého okna.
 predict_full() {
   [ "$1" -gt 0 ] 2>/dev/null && [ "$2" -gt 0 ] 2>/dev/null || return 0
-  local now start elapsed eta
-  now=$(date +%s); start=$(( $2 - $3 )); elapsed=$(( now - start ))
-  [ "$elapsed" -ge 900 ] || return 0
-  eta=$(( start + elapsed * 100 / $1 ))
-  if [ "$eta" -lt "$2" ]; then
-    printf '%s⚠%s%s' "$C_RED" "$(date -r "$eta" +"$4" 2>/dev/null)" "$C_RESET"
+  local out kind val arrow
+  out=$(cat "$RL_HIST" 2>/dev/null | awk -v now="$NOW" -v cur="$1" -v reset="$2" -v win="$3" -v col="$5" -v look="$6" '
+    { d = $(col+1) - reset; if (d < 0) d = -d
+      if (d > 600 || $col < 0 || $1 < now - 2 * look) next   # jiné okno nebo moc staré
+      if ($1 <= now - look) { ta = $1; pa = $col }             # nejnovější aspoň look starý
+      if (!tb) { tb = $1; pb = $col } }                        # nejstarší dostupný
+    END {
+      start = reset - win; el = now - start
+      if (el < 900) exit
+      avg = cur / el; rate = avg; arrow = ""
+      if (ta) { t0 = ta; p0 = pa } else { t0 = tb; p0 = pb }
+      span = t0 ? now - t0 : 0
+      if (look > 0 && span >= look / 2) {
+        dp = cur - p0; rec = dp / span
+        if (dp >= 2) {
+          rate = rec
+          if (rec > avg * 1.25) arrow = "↗"; else if (rec < avg * 0.75) arrow = "↘"
+        } else if (avg * span >= 4) arrow = "↘"
+      }
+      if (rate <= 0) { printf "pct %d %s\n", cur, arrow; exit }
+      eta = now + (100 - cur) / rate
+      if (eta < reset) printf "eta %d %s\n", eta, arrow
+      else printf "pct %d %s\n", int(cur + rate * (reset - now) + 0.5), arrow
+    }' 2>/dev/null)
+  [ -n "$out" ] || return 0
+  read -r kind val arrow <<<"$out"
+  if [ "$kind" = "eta" ]; then
+    printf '%s⚠%s%s%s' "$C_RED" "$(date -r "$val" +"$4" 2>/dev/null)" "$arrow" "$C_RESET"
   else
-    printf '%s→%d%%%s' "$C_LABEL" $(( $1 * $3 / elapsed )) "$C_RESET"
+    printf '%s→%d%%%s%s' "$C_LABEL" "$val" "$arrow" "$C_RESET"
   fi
 }
 
@@ -218,13 +260,13 @@ RL=""
 if [ "$RL5" -ge 0 ]; then
   RL="$(pct_color "$RL5")5h:${RL5}%${C_RESET}"
   R=$(fmt_reset "$RL5R" "%H:%M"); [ -n "$R" ] && RL="${RL}${C_LABEL}⟳${R}${C_RESET}"
-  P=$(predict_full "$RL5" "$RL5R" 18000 "%H:%M"); [ -n "$P" ] && RL="${RL} ${P}"
+  P=$(predict_full "$RL5" "$RL5R" 18000 "%H:%M" 2 1800); [ -n "$P" ] && RL="${RL} ${P}"
 fi
 if [ "$RL7" -ge 0 ]; then
   [ -n "$RL" ] && RL="${RL} · "
   RL="${RL}$(pct_color "$RL7")7d:${RL7}%${C_RESET}"
   R=$(fmt_reset "$RL7R" "%d.%m"); [ -n "$R" ] && RL="${RL}${C_LABEL}⟳${R}${C_RESET}"
-  P=$(predict_full "$RL7" "$RL7R" 604800 "%d.%m %H:%M"); [ -n "$P" ] && RL="${RL} ${P}"
+  P=$(predict_full "$RL7" "$RL7R" 604800 "%d.%m %H:%M" 4 0); [ -n "$P" ] && RL="${RL} ${P}"
 fi
 
 # Assemble (dva řádky, zlom za kontextem):
